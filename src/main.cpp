@@ -255,21 +255,28 @@ void parse_response(std::string resp)
 
 int main(int argc, char **argv)
 {
-    try {
+    try
+    {
         boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
         ctx.set_default_verify_paths();
         boost::asio::io_service io_service;
         std::string server("api.stubhub.com");
         std::string path(create_catalog_search_uri("10",
-                "popularity",
-                "desc",
-                "0",                    // first event
-                "500",                  // number of events (500 max allowed)
-                "id,title,dateLocal,eventInfoUrl,ticketInfo,dateUTC,status&"));
+                    "popularity",
+                    "desc",
+                    "0",                    // first event
+                    "500",                  // number of events (500 max allowed)
+                    "id,title,dateLocal,eventInfoUrl,ticketInfo,dateUTC,status&"));
         std::string resp1, resp2;
 
         client clt1(ctx, io_service, server, path, "X79M_nCok44Uifr1dnVUG2eqFXYa", &parse_response);
         client clt2(ctx, io_service, server, path, "f182zzoa0aIwwo55yYEeshScrv0a", &parse_response);
+        client clt3(ctx, io_service, server, path, "nDvTLDEeXfkWhZZeACbRCLd2ViQa", &parse_response);
+        client clt4(ctx, io_service, server, path, "wJPjHnp3Y3akIvEjSODBPRlJdHoa", &parse_response);
+        client clt5(ctx, io_service, server, path, "7hUPI4qZzoxIAkq7fBvJfAmMYQwa", &parse_response);
+        client clt6(ctx, io_service, server, path, "MCgRv3mTBQuqKB7kKh5wmCivaC0a", &parse_response);
+        client clt7(ctx, io_service, server, path, "9UF7hZfxL4NabSxu_LgxA1tVThEa", &parse_response);
+        client clt8(ctx, io_service, server, path, "zrs2EN25NuDc2qobY5sFrB8dy9Qa", &parse_response);
 
         io_service.run();
     }

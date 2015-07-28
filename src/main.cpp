@@ -7,6 +7,15 @@
 #include <boost/bind.hpp>
 #include <boost/asio/ssl.hpp>
 
+#if defined(__SSE4_2__)
+#    define RAPIDJSON_SSE42
+#elif defined(__SSE2__)
+#    define RAPIDJSON_SSE2
+#endif
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
+
 using boost::asio::ip::tcp;
 
 std::string create_catalog_search_uri(std::string minTickets,
@@ -227,6 +236,23 @@ class client
      std::stringstream result_;
  };
 
+void parse_response(std::string resp)
+{
+    rapidjson::Document doc;
+    doc.Parse(resp.c_str());
+    if (!doc.IsObject())
+    {
+        std::cout << "response is not a valid JSON object!\n";
+        return;
+    }
+    if (!doc.HasMember("numFound"))
+    {
+        std::cout << "reponse does not have 'numFound' member!\n";
+        return;
+    }
+    std::cout << "Records found: " << doc["numFound"].GetInt() << "\n";
+}
+
 int main(int argc, char **argv)
 {
     try {
@@ -242,10 +268,9 @@ int main(int argc, char **argv)
                 "id,title,dateLocal,eventInfoUrl,ticketInfo,dateUTC,status&"));
         std::string resp1, resp2;
 
-        client clt1(ctx, io_service, server, path, "X79M_nCok44Uifr1dnVUG2eqFXYa",
-                [&resp1](std::string res) { std::cout << "RESULT1:\n" << res << std::endl;});
-        client clt2(ctx, io_service, server, path, "f182zzoa0aIwwo55yYEeshScrv0a",
-                [&resp2](std::string res) { std::cout << "RESULT2:\n" << res << std::endl; });
+        client clt1(ctx, io_service, server, path, "X79M_nCok44Uifr1dnVUG2eqFXYa", &parse_response);
+        client clt2(ctx, io_service, server, path, "f182zzoa0aIwwo55yYEeshScrv0a", &parse_response);
+
         io_service.run();
     }
     catch (std::exception& ex)

@@ -38,20 +38,25 @@ class client
 {
     public:
         typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> socket;
+        typedef std::function<void (std::string)> handle_results_fn;
 
         client(boost::asio::ssl::context& ctx,
                 boost::asio::io_service& io_service,
                 const std::string& server,
-                const std::string& path)
+                const std::string& path,
+                const std::string& token,
+                handle_results_fn handle_results
+                )
             : resolver_(io_service)
             , socket_(io_service, ctx)
             , server_(server)
+            , handle_results_(handle_results)
     {
         std::ostream request_stream(&request_);
         request_stream << "GET " << path << " HTTP/1.0\r\n";
         request_stream << "Host: " << server << "\r\n";
         request_stream << "Accept: */*\r\n";
-        request_stream << "Authorization: Bearer X79M_nCok44Uifr1dnVUG2eqFXYa\r\n";
+        request_stream << "Authorization: Bearer " << token << "\n"; //X79M_nCok44Uifr1dnVUG2eqFXYa\r\n";
         request_stream << "Connection: close\r\n\r\n";
         tcp::resolver::query query(server, "https");
         resolver_.async_resolve(query,
@@ -64,13 +69,15 @@ class client
      void handle_resolve(const boost::system::error_code& err,
                          tcp::resolver::iterator endpoint_iterator)
      {
-         if (!err) {
+         if (!err)
+         {
              tcp::endpoint endpoint = *endpoint_iterator;
              socket_.lowest_layer().async_connect(endpoint,
                      boost::bind(&client::handle_connect, this,
                          boost::asio::placeholders::error, ++endpoint_iterator));
          }
-         else {
+         else
+         {
              std::cout << "(handle_resolve) Error: " << err.message() << "\n";
          }
      }
@@ -79,26 +86,25 @@ class client
                          tcp::resolver::iterator endpoint_iterator)
      {
          namespace ssl = boost::asio::ssl;
-         if (!err) {
+         if (!err)
+         {
              socket_.lowest_layer().set_option(tcp::no_delay(true));
              socket_.set_verify_mode(ssl::verify_peer);
              socket_.set_verify_callback(ssl::rfc2818_verification(server_));
              socket_.async_handshake(socket::client,
                      boost::bind(&client::handle_handshake, this,
                          boost::asio::placeholders::error));
-
-             /* boost::asio::async_write(socket_, request_, */
-             /*                          boost::bind(&client::handle_write_request, this, */
-             /*                                      boost::asio::placeholders::error)); */
          }
-         else if (endpoint_iterator != tcp::resolver::iterator()) {
+         else if (endpoint_iterator != tcp::resolver::iterator())
+         {
              socket_.lowest_layer().close();
              tcp::endpoint endpoint = *endpoint_iterator;
              socket_.lowest_layer().async_connect(endpoint,
                      boost::bind(&client::handle_connect, this,
                          boost::asio::placeholders::error, ++endpoint_iterator));
          }
-         else {
+         else
+         {
              std::cout << "(handle_connect) Error: " << err.message() << "\n";
          }
      }
@@ -119,19 +125,22 @@ class client
 
      void handle_write_request(const boost::system::error_code& err)
      {
-         if (!err) {
+         if (!err)
+         {
              boost::asio::async_read_until(socket_, response_, "\r\n",
                      boost::bind(&client::handle_read_status_line, this,
                          boost::asio::placeholders::error));
          }
-         else {
+         else
+         {
              std::cout << "(handle_write_request) Error: " << err.message() << "\n";
          }
      }
 
      void handle_read_status_line(const boost::system::error_code& err)
      {
-         if (!err) {
+         if (!err)
+         {
              std::istream response_stream(&response_);
              std::string http_version;
              response_stream >> http_version;
@@ -139,11 +148,13 @@ class client
              response_stream >> status_code;
              std::string status_message;
              std::getline(response_stream, status_message);
-             if (!response_stream || http_version.substr(0, 5) != "HTTP/") {
+             if (!response_stream || http_version.substr(0, 5) != "HTTP/")
+             {
                  std::cout << "Invalid response\n";
                  return;
              }
-             if (status_code != 200) {
+             if (status_code != 200)
+             {
                  std::cout << "Response returned with status code ";
                  std::cout << status_code << "\n";
                  return;
@@ -153,23 +164,27 @@ class client
                      boost::bind(&client::handle_read_headers, this,
                          boost::asio::placeholders::error));
          }
-         else {
+         else
+         {
              std::cout << "(handle_read_status_line) Error: " << err << "\n";
          }
      }
 
      void handle_read_headers(const boost::system::error_code& err)
      {
-         if (!err) {
+         if (!err)
+         {
              std::istream response_stream(&response_);
              std::string header;
-             while (std::getline(response_stream, header) && header != "\r") {
+             while (std::getline(response_stream, header) && header != "\r")
+             {
                  std::cout << header << "\n";
              }
              std::cout << "\n";
 
-             if (response_.size() > 0) {
-                 std::cout << &response_;
+             if (response_.size() > 0)
+             {
+                 result_ << &response_;
              }
 
              boost::asio::async_read(socket_, response_,
@@ -177,30 +192,39 @@ class client
                      boost::bind(&client::handle_read_content, this,
                          boost::asio::placeholders::error));
          }
-         else {
+         else
+         {
              std::cout << "(handle_read_headers) Error: " << err << "\n";
          }
      }
 
      void handle_read_content(const boost::system::error_code& err)
      {
-         if (!err) {
-             std::cout << &response_;
+         if (!err)
+         {
+             result_ << &response_;
              boost::asio::async_read(socket_, response_,
                      boost::asio::transfer_at_least(1),
                      boost::bind(&client::handle_read_content, this,
                          boost::asio::placeholders::error));
          }
-         else if (err != boost::asio::error::eof) {
+         else if (err != boost::asio::error::eof)
+         {
              std::cout << "(handle_read_content) Error: " << err << "\n";
+         }
+         else
+         {
+            handle_results_(result_.str());
          }
      }
 
      tcp::resolver resolver_;
      socket socket_;
      std::string server_;
+     std::function<void (std::string)> handle_results_;
      boost::asio::streambuf request_;
      boost::asio::streambuf response_;
+     std::stringstream result_;
  };
 
 int main(int argc, char **argv)
@@ -216,8 +240,9 @@ int main(int argc, char **argv)
                 "0",                    // first event
                 "500",                  // number of events (500 max allowed)
                 "id,title,dateLocal,eventInfoUrl,ticketInfo,dateUTC,status&"));
-//        client clt(ctx, io_service, "www.boost.org", "/LICENSE_1_0.txt");
-        client clt(ctx, io_service, server, path);
+        std::string token("X79M_nCok44Uifr1dnVUG2eqFXYa");
+        client clt(ctx, io_service, server, path, token,
+                [](std::string res) { std::cout << "RESULT:\n" << res << std::endl; });
         io_service.run();
     }
     catch (std::exception& ex)

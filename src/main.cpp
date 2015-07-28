@@ -178,9 +178,9 @@ class client
              std::string header;
              while (std::getline(response_stream, header) && header != "\r")
              {
-                 std::cout << header << "\n";
+                 //std::cout << header << "\n";
              }
-             std::cout << "\n";
+             //std::cout << "\n";
 
              if (response_.size() > 0)
              {
@@ -240,9 +240,12 @@ int main(int argc, char **argv)
                 "0",                    // first event
                 "500",                  // number of events (500 max allowed)
                 "id,title,dateLocal,eventInfoUrl,ticketInfo,dateUTC,status&"));
-        std::string token("X79M_nCok44Uifr1dnVUG2eqFXYa");
-        client clt(ctx, io_service, server, path, token,
-                [](std::string res) { std::cout << "RESULT:\n" << res << std::endl; });
+        std::string resp1, resp2;
+
+        client clt1(ctx, io_service, server, path, "X79M_nCok44Uifr1dnVUG2eqFXYa",
+                [&resp1](std::string res) { std::cout << "RESULT1:\n" << res << std::endl;});
+        client clt2(ctx, io_service, server, path, "f182zzoa0aIwwo55yYEeshScrv0a",
+                [&resp2](std::string res) { std::cout << "RESULT2:\n" << res << std::endl; });
         io_service.run();
     }
     catch (std::exception& ex)

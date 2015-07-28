@@ -5,28 +5,60 @@
 #include <string>
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
+#include <boost/asio/ssl.hpp>
 
 using boost::asio::ip::tcp;
 
- class client
- {
- public:
-     client(boost::asio::io_service& io_service,
-            const std::string& server, const std::string& path)
-         : resolver_(io_service)
-         , socket_(io_service)
-         {
-             std::ostream request_stream(&request_);
-             request_stream << "GET " << path << " HTTP/1.0\r\n";
-             request_stream << "Host: " << server << "\r\n";
-             request_stream << "Accept: */*\r\n";
-             request_stream << "Connection: close\r\n\r\n";
-             tcp::resolver::query query(server, "http");
-             resolver_.async_resolve(query,
-                                     boost::bind(&client::handle_resolve, this,
-                                                 boost::asio::placeholders::error,
-                                                 boost::asio::placeholders::iterator));
-         }
+std::string create_catalog_search_uri(std::string minTickets,
+        std::string sortMethod,
+        std::string sortDirection,
+        std::string firstEvent,
+        std::string maxEvents,
+        std::string fieldList)
+{
+    static std::string url("/search/catalog/events/v2?maxPrice=99999");
+    static std::string minTicketLimit("&minAvailableTickets=");
+    static std::string sortMethodLimit("&sort=");
+    static std::string sortDirectionLimit("%20"); // replace space with 0x20
+    static std::string firstEventLimit("&start=");
+    static std::string maxEventLimit("&limit=");
+    static std::string fieldListLimit("&fieldList=");
+
+    return url
+        + minTicketLimit + minTickets
+        + sortMethodLimit + sortMethod
+        + sortDirectionLimit + sortDirection
+        + firstEventLimit + firstEvent
+        + maxEventLimit + maxEvents
+        + fieldListLimit + fieldList
+        ;
+}
+
+class client
+{
+    public:
+        typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> socket;
+
+        client(boost::asio::ssl::context& ctx,
+                boost::asio::io_service& io_service,
+                const std::string& server,
+                const std::string& path)
+            : resolver_(io_service)
+            , socket_(io_service, ctx)
+            , server_(server)
+    {
+        std::ostream request_stream(&request_);
+        request_stream << "GET " << path << " HTTP/1.0\r\n";
+        request_stream << "Host: " << server << "\r\n";
+        request_stream << "Accept: */*\r\n";
+        request_stream << "Authorization: Bearer X79M_nCok44Uifr1dnVUG2eqFXYa\r\n";
+        request_stream << "Connection: close\r\n\r\n";
+        tcp::resolver::query query(server, "https");
+        resolver_.async_resolve(query,
+                boost::bind(&client::handle_resolve, this,
+                    boost::asio::placeholders::error,
+                    boost::asio::placeholders::iterator));
+    }
 
  private:
      void handle_resolve(const boost::system::error_code& err,
@@ -34,32 +66,54 @@ using boost::asio::ip::tcp;
      {
          if (!err) {
              tcp::endpoint endpoint = *endpoint_iterator;
-             socket_.async_connect(endpoint,
-                                   boost::bind(&client::handle_connect, this,
-                                               boost::asio::placeholders::error, ++endpoint_iterator));
+             socket_.lowest_layer().async_connect(endpoint,
+                     boost::bind(&client::handle_connect, this,
+                         boost::asio::placeholders::error, ++endpoint_iterator));
          }
          else {
-             std::cout << "Error: " << err.message() << "\n";
+             std::cout << "(handle_resolve) Error: " << err.message() << "\n";
          }
      }
 
      void handle_connect(const boost::system::error_code& err,
                          tcp::resolver::iterator endpoint_iterator)
      {
+         namespace ssl = boost::asio::ssl;
          if (!err) {
-             boost::asio::async_write(socket_, request_,
-                                      boost::bind(&client::handle_write_request, this,
-                                                  boost::asio::placeholders::error));
+             socket_.lowest_layer().set_option(tcp::no_delay(true));
+             socket_.set_verify_mode(ssl::verify_peer);
+             socket_.set_verify_callback(ssl::rfc2818_verification(server_));
+             socket_.async_handshake(socket::client,
+                     boost::bind(&client::handle_handshake, this,
+                         boost::asio::placeholders::error));
+
+             /* boost::asio::async_write(socket_, request_, */
+             /*                          boost::bind(&client::handle_write_request, this, */
+             /*                                      boost::asio::placeholders::error)); */
          }
          else if (endpoint_iterator != tcp::resolver::iterator()) {
-             socket_.close();
+             socket_.lowest_layer().close();
              tcp::endpoint endpoint = *endpoint_iterator;
-             socket_.async_connect(endpoint,
-                                   boost::bind(&client::handle_connect, this,
-                                               boost::asio::placeholders::error, ++endpoint_iterator));
+             socket_.lowest_layer().async_connect(endpoint,
+                     boost::bind(&client::handle_connect, this,
+                         boost::asio::placeholders::error, ++endpoint_iterator));
          }
          else {
-             std::cout << "Error: " << err.message() << "\n";
+             std::cout << "(handle_connect) Error: " << err.message() << "\n";
+         }
+     }
+
+     void handle_handshake(const boost::system::error_code& err)
+     {
+         if (!err)
+         {
+             boost::asio::async_write(socket_, request_,
+                     boost::bind(&client::handle_write_request, this,
+                         boost::asio::placeholders::error));
+         }
+         else
+         {
+             std::cout << "(handle_handshake) Error: " << err.message() << "\n";
          }
      }
 
@@ -67,11 +121,11 @@ using boost::asio::ip::tcp;
      {
          if (!err) {
              boost::asio::async_read_until(socket_, response_, "\r\n",
-                 boost::bind(&client::handle_read_status_line, this,
-                             boost::asio::placeholders::error));
+                     boost::bind(&client::handle_read_status_line, this,
+                         boost::asio::placeholders::error));
          }
          else {
-             std::cout << "Error: " << err.message() << "\n";
+             std::cout << "(handle_write_request) Error: " << err.message() << "\n";
          }
      }
 
@@ -96,11 +150,11 @@ using boost::asio::ip::tcp;
              }
 
              boost::asio::async_read_until(socket_, response_, "\r\n\r\n",
-                                           boost::bind(&client::handle_read_headers, this,
-                                                       boost::asio::placeholders::error));
+                     boost::bind(&client::handle_read_headers, this,
+                         boost::asio::placeholders::error));
          }
          else {
-             std::cout << "Error: " << err << "\n";
+             std::cout << "(handle_read_status_line) Error: " << err << "\n";
          }
      }
 
@@ -119,12 +173,12 @@ using boost::asio::ip::tcp;
              }
 
              boost::asio::async_read(socket_, response_,
-                                     boost::asio::transfer_at_least(1),
-                                     boost::bind(&client::handle_read_content, this,
-                                                 boost::asio::placeholders::error));
+                     boost::asio::transfer_at_least(1),
+                     boost::bind(&client::handle_read_content, this,
+                         boost::asio::placeholders::error));
          }
          else {
-             std::cout << "Error: " << err << "\n";
+             std::cout << "(handle_read_headers) Error: " << err << "\n";
          }
      }
 
@@ -133,17 +187,18 @@ using boost::asio::ip::tcp;
          if (!err) {
              std::cout << &response_;
              boost::asio::async_read(socket_, response_,
-                                     boost::asio::transfer_at_least(1),
-                                     boost::bind(&client::handle_read_content, this,
-                                                 boost::asio::placeholders::error));
+                     boost::asio::transfer_at_least(1),
+                     boost::bind(&client::handle_read_content, this,
+                         boost::asio::placeholders::error));
          }
          else if (err != boost::asio::error::eof) {
-             std::cout << "Error: " << err << "\n";
+             std::cout << "(handle_read_content) Error: " << err << "\n";
          }
      }
 
      tcp::resolver resolver_;
-     tcp::socket socket_;
+     socket socket_;
+     std::string server_;
      boost::asio::streambuf request_;
      boost::asio::streambuf response_;
  };
@@ -151,8 +206,18 @@ using boost::asio::ip::tcp;
 int main(int argc, char **argv)
 {
     try {
+        boost::asio::ssl::context ctx(boost::asio::ssl::context::sslv23);
+        ctx.set_default_verify_paths();
         boost::asio::io_service io_service;
-        client clt(io_service, "www.boost.org", "/LICENSE_1_0.txt");
+        std::string server("api.stubhub.com");
+        std::string path(create_catalog_search_uri("10",
+                "popularity",
+                "desc",
+                "0",                    // first event
+                "500",                  // number of events (500 max allowed)
+                "id,title,dateLocal,eventInfoUrl,ticketInfo,dateUTC,status&"));
+//        client clt(ctx, io_service, "www.boost.org", "/LICENSE_1_0.txt");
+        client clt(ctx, io_service, server, path);
         io_service.run();
     }
     catch (std::exception& ex)
